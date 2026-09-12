@@ -329,8 +329,8 @@ export function applyManualSubChange(
   segmentIndex: number,
   subIndex: number,
   inPlayerId: string,
-  players: Player[],
-  subRules: SubstitutionRule[]
+  _players: Player[],
+  _subRules: SubstitutionRule[]
 ): GamePlan {
   const segments = cloneSegments(plan.segments);
   const segment = segments[segmentIndex];
