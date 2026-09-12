@@ -147,11 +147,16 @@ export default function EditableSegmentLineup({
                       ([id, pid]) => id !== slot.id && pid === p.id
                     );
                     const onBench = draftBench.includes(p.id);
+                    const displaced = current
+                      ? `#${current.number} ${current.name.split(" ")[0]}`
+                      : null;
                     const tag = onFieldElsewhere
-                      ? " (swap)"
-                      : onBench
-                        ? " (from bench)"
-                        : "";
+                      ? " (swap positions — minutes unchanged)"
+                      : onBench && displaced
+                        ? ` (from bench, replaces ${displaced})`
+                        : onBench
+                          ? " (from bench)"
+                          : "";
                     return (
                       <option key={p.id} value={p.id}>
                         #{p.number} {p.name}

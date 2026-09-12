@@ -6,6 +6,7 @@ import {
   addSegmentMinutes,
   applyHalfTimeKeeperSwap,
   applySubs,
+  calculatePlayerMinutesFromPlan,
   getBench,
   pickSubsForRotation,
 } from "./substitutionEngine";
@@ -157,7 +158,7 @@ export function setLineupSlotPlayer(
   slotId: string,
   playerId: string
 ): Record<string, string | null> {
-  const next = { ...lineup };
+  const next: Record<string, string | null> = { ...lineup };
   const displaced = next[slotId];
 
   const otherSlot = Object.entries(next).find(
@@ -165,10 +166,17 @@ export function setLineupSlotPlayer(
   )?.[0];
 
   if (otherSlot) {
-    next[otherSlot] = displaced;
+    // Already on the field → swap positions (both stay on; minutes unchanged).
+    next[otherSlot] = displaced ?? null;
+    next[slotId] = playerId;
+    return next;
   }
 
+  // Coming from the bench → take this seat; displaced player goes to the bench.
   next[slotId] = playerId;
+  for (const [id, pid] of Object.entries(next)) {
+    if (id !== slotId && pid === playerId) next[id] = null;
+  }
   return next;
 }
 
@@ -276,18 +284,44 @@ export function applySegmentLineupChange(
     substitutions,
   };
 
-  // Editing kickoff clears later manual locks; mid-game edits keep prior locks.
-  const manualSegments =
-    segmentIndex === 0
-      ? [0]
-      : [...new Set([...(plan.manualSegments ?? []), segmentIndex])];
+  // Keep sub labels on the following rotation in sync with the new previous XI.
+  if (segmentIndex + 1 < segments.length) {
+    const next = segments[segmentIndex + 1];
+    segments[segmentIndex + 1] = {
+      ...next,
+      substitutions: normalizeSegmentSubs(
+        lineup,
+        next.lineup,
+        plan.activePlayerIds,
+        next.substitutions
+      ),
+    };
+  }
 
-  return rebuildPlanFromSegment(
-    { ...plan, segments, manualSegments },
-    segmentIndex === 0 ? 1 : segmentIndex,
-    players,
-    subRules
-  );
+  const manualSegments = [
+    ...new Set([...(plan.manualSegments ?? []), segmentIndex]),
+  ];
+  const nextPlan: GamePlan = {
+    ...plan,
+    segments,
+    manualSegments,
+  };
+
+  // Kickoff edit: rebuild unlocked later rotations; keep other edited segments.
+  if (segmentIndex === 0) {
+    const rebuilt = rebuildPlanFromSegment(nextPlan, 1, players, subRules);
+    return {
+      ...rebuilt,
+      playerMinutes: calculatePlayerMinutesFromPlan(rebuilt),
+    };
+  }
+
+  // Mid-plan edit: do not auto-rewrite later rotations (that often re-inserts the
+  // swapped-out player and cancels the minute change). Only recount play time.
+  return {
+    ...nextPlan,
+    playerMinutes: calculatePlayerMinutesFromPlan(nextPlan),
+  };
 }
 
 export function applyManualSubChange(
@@ -323,15 +357,31 @@ export function applyManualSubChange(
   segment.lineup = lineup;
   segment.bench = getBench(plan.activePlayerIds, lineup);
 
-  const manualSegments = new Set(plan.manualSegments ?? []);
-  manualSegments.add(segmentIndex);
+  if (segmentIndex + 1 < segments.length) {
+    const next = segments[segmentIndex + 1];
+    segments[segmentIndex + 1] = {
+      ...next,
+      substitutions: normalizeSegmentSubs(
+        lineup,
+        next.lineup,
+        plan.activePlayerIds,
+        next.substitutions
+      ),
+    };
+  }
 
-  return rebuildPlanFromSegment(
-    { ...plan, segments, manualSegments: [...manualSegments] },
-    segmentIndex,
-    players,
-    subRules
-  );
+  const manualSegments = [...new Set([...(plan.manualSegments ?? []), segmentIndex])];
+  const nextPlan: GamePlan = {
+    ...plan,
+    segments,
+    manualSegments,
+  };
+
+  // Keep later edited/auto rotations as-is; only recount minutes from lineups.
+  return {
+    ...nextPlan,
+    playerMinutes: calculatePlayerMinutesFromPlan(nextPlan),
+  };
 }
 
 export function rebuildPlanFromSegment(

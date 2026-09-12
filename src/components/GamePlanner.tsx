@@ -305,9 +305,10 @@ export default function GamePlanner({
             coachingProfiles={coachingProfiles}
             onRegenerate={handleRebuildKeepingEdits}
             onRecalculateMinutes={() =>
-              onPlanChange(
-                rebuildKeepingManualEdits(plan, players, subRules)
-              )
+              onPlanChange({
+                ...plan,
+                playerMinutes: calculatePlayerMinutesFromPlan(plan),
+              })
             }
           />
 
@@ -471,6 +472,11 @@ function MinutesTable({
   onRecalculateMinutes: () => void;
 }) {
   const totalMinutes = plan.settings.halfMinutes * 2;
+  // Always derive from current pitches so edits can't leave stale totals.
+  const projectedMinutes = useMemo(
+    () => calculatePlayerMinutesFromPlan(plan),
+    [plan]
+  );
   const coachingTargets = useMemo(
     () =>
       computePlayerTargets(
@@ -491,7 +497,7 @@ function MinutesTable({
   }, [plan.playerTargets]);
 
   const sorted = [...players].sort(
-    (a, b) => (plan.playerMinutes[a.id] ?? 0) - (plan.playerMinutes[b.id] ?? 0)
+    (a, b) => (projectedMinutes[a.id] ?? 0) - (projectedMinutes[b.id] ?? 0)
   );
 
   const hasTargetChanges = plan.activePlayerIds.some(
@@ -531,7 +537,9 @@ function MinutesTable({
           <p className="mt-1 text-xs text-gray-500">
             With ~6 min rotations, projected time jumps in chunks (e.g. 25.0 / 31.3 / 37.5), so
             it rarely matches the target exactly. Locked/edited rotations (and “duplicate 1st
-            half”) freeze those lineups, so the engine can’t rebalance them.
+            half”) freeze those lineups, so the engine can’t rebalance them. Swapping two
+            players who are both already on the pitch only changes positions — minutes stay
+            the same.
           </p>
         </div>
         <button
@@ -543,13 +551,13 @@ function MinutesTable({
         </button>
       </div>
       <p className="mt-1 text-xs text-gray-500">
-        Refresh updates projected minutes without changing your edited lineups. Applying
-        targets only rebuilds unedited rotations.
+        Refresh saves recounted minutes from the current pitches. Applying targets rebuilds
+        unedited rotations.
       </p>
 
       <ul className="mt-3 space-y-2">
         {sorted.map((p) => {
-          const projected = plan.playerMinutes[p.id] ?? 0;
+          const projected = projectedMinutes[p.id] ?? 0;
           const target = draftTargets[p.id] ?? plan.playerTargets[p.id] ?? plan.targetMinutes;
           const coaching = coachingTargets[p.id] ?? plan.targetMinutes;
           const isOverridden = Math.abs(target - coaching) >= 0.5;
