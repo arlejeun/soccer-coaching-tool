@@ -465,6 +465,83 @@ export function rebuildPlanFromSegment(
   };
 }
 
+/**
+ * Refresh targets / auto rotations while locking every manually edited segment.
+ * Play times are recalculated from the resulting lineups.
+ */
+export function rebuildKeepingManualEdits(
+  plan: GamePlan,
+  players: Player[],
+  subRules: SubstitutionRule[],
+  updates: {
+    playerTargets?: Record<string, number>;
+    manualTargetOverrides?: Record<string, number>;
+  } = {}
+): GamePlan {
+  const manualTargetOverrides =
+    updates.manualTargetOverrides ?? plan.manualTargetOverrides ?? {};
+  const playerTargets = updates.playerTargets ?? plan.playerTargets;
+
+  return rebuildPlanFromSegment(
+    {
+      ...plan,
+      playerTargets,
+      manualTargetOverrides:
+        Object.keys(manualTargetOverrides).length > 0
+          ? manualTargetOverrides
+          : undefined,
+    },
+    0,
+    players,
+    subRules
+  );
+}
+
+/**
+ * Copy each 1st-half rotation onto the matching 2nd-half slot.
+ * Applies the 2nd-half keeper when configured, locks both halves as edited,
+ * and recalculates play times.
+ */
+export function duplicateFirstHalfToSecondHalf(
+  plan: GamePlan,
+  players: Player[],
+  subRules: SubstitutionRule[]
+): GamePlan {
+  const n = plan.settings.segmentsPerHalf;
+  if (n < 1 || plan.segments.length < n * 2) return plan;
+
+  const segments = cloneSegments(plan.segments);
+  const active = players.filter((p) => plan.activePlayerIds.includes(p.id));
+  const manual = new Set(plan.manualSegments ?? []);
+
+  for (let i = 0; i < n; i++) {
+    manual.add(i);
+    let lineup = { ...segments[i].lineup };
+    if (plan.settings.secondHalfKeeperId) {
+      lineup = applyHalfTimeKeeperSwap(
+        lineup,
+        plan.settings.secondHalfKeeperId,
+        active
+      ).lineup;
+    }
+    const secondIdx = i + n;
+    segments[secondIdx] = {
+      ...segments[secondIdx],
+      lineup,
+      bench: getBench(plan.activePlayerIds, lineup),
+      substitutions: [],
+    };
+    manual.add(secondIdx);
+  }
+
+  return rebuildPlanFromSegment(
+    { ...plan, segments, manualSegments: [...manual] },
+    n,
+    players,
+    subRules
+  );
+}
+
 export function checkSubWarnings(
   plan: GamePlan,
   segmentIndex: number,

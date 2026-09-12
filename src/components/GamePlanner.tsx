@@ -7,9 +7,9 @@ import {
   getPlayerById,
   validateRoster,
 } from "../lib/substitutionEngine";
-import { computePlayerTargets } from "../lib/coachingScore";
-import { applyStartingLineupChange } from "../lib/planEdits";
+import { applyStartingLineupChange, duplicateFirstHalfToSecondHalf, rebuildKeepingManualEdits, slotLabel } from "../lib/planEdits";
 import { getAvailablePlayers } from "../lib/availability";
+import { computePlayerTargets, resolvePlayerTargets } from "../lib/coachingScore";
 import GameDayAvailability from "./GameDayAvailability";
 import SubstitutionRulesEditor from "./SubstitutionRulesEditor";
 import EditableSubstitution from "./EditableSubstitution";
@@ -18,7 +18,6 @@ import PlanPrintSheet, { printGamePlan } from "./PlanPrintSheet";
 import { POSITION_COLORS } from "../types";
 import { ABSENCE_REASON_LABELS } from "../lib/availability";
 import { benchSubIndex, getBenchSubstitutions, getFieldShuffles } from "../lib/subDisplay";
-import { slotLabel } from "../lib/planEdits";
 import { useEffect, useMemo, useState } from "react";
 
 interface Props {
@@ -86,6 +85,27 @@ export default function GamePlanner({
       manualTargetOverrides: Object.keys(overrides).length > 0 ? overrides : undefined,
       manualSegments: [],
     });
+  };
+
+  /** Update targets / auto rotations; keep every manually edited lineup & sub. */
+  const handleRebuildKeepingEdits = (overrides: Record<string, number>) => {
+    if (!plan) return;
+    const playerTargets = resolvePlayerTargets(
+      plan.activePlayerIds,
+      computePlayerTargets(
+        plan.activePlayerIds,
+        coachingProfiles,
+        settings,
+        totalMinutes
+      ),
+      overrides
+    );
+    onPlanChange(
+      rebuildKeepingManualEdits(plan, players, subRules, {
+        playerTargets,
+        manualTargetOverrides: overrides,
+      })
+    );
   };
 
   return (
@@ -283,21 +303,31 @@ export default function GamePlanner({
               (plan.activePlayerIds ?? players.map((x) => x.id)).includes(p.id)
             )}
             coachingProfiles={coachingProfiles}
-            onRegenerate={(overrides) =>
-              handleGenerate(overrides, {
-                preserveStartingLineup: plan.manualSegments?.includes(0),
-              })
-            }
+            onRegenerate={handleRebuildKeepingEdits}
             onRecalculateMinutes={() =>
-              onPlanChange({
-                ...plan,
-                playerMinutes: calculatePlayerMinutesFromPlan(plan),
-              })
+              onPlanChange(
+                rebuildKeepingManualEdits(plan, players, subRules)
+              )
             }
           />
 
           <div className="space-y-3">
-            <h3 className="font-semibold text-gray-900">Rotation Schedule</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold text-gray-900">Rotation Schedule</h3>
+              <button
+                type="button"
+                onClick={() =>
+                  onPlanChange(duplicateFirstHalfToSecondHalf(plan, players, subRules))
+                }
+                className="rounded-lg border border-pitch bg-green-50 px-3 py-1.5 text-xs font-semibold text-pitch hover:bg-green-100"
+              >
+                Duplicate 1st half → 2nd half
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">
+              Copies each 1st-half lineup into the matching 2nd-half rotation (applies 2nd-half
+              keeper). Your 1st-half edits stay; 2nd half is marked edited.
+            </p>
             {plan.segments.map((segment) => {
               const prevLineup =
                 segment.segmentIndex > 0
@@ -463,8 +493,6 @@ function MinutesTable({
   const sorted = [...players].sort(
     (a, b) => (plan.playerMinutes[a.id] ?? 0) - (plan.playerMinutes[b.id] ?? 0)
   );
-  const maxMin = Math.max(...Object.values(plan.playerMinutes));
-  const minMin = Math.min(...Object.values(plan.playerMinutes));
 
   const hasTargetChanges = plan.activePlayerIds.some(
     (id) => Math.abs((draftTargets[id] ?? 0) - (plan.playerTargets[id] ?? 0)) >= 0.5
@@ -495,17 +523,29 @@ function MinutesTable({
         <div>
           <h3 className="font-semibold text-gray-900">Projected Playing Time</h3>
           <p className="text-sm text-gray-600">
-            Spread: {(maxMin - minMin).toFixed(1)} min · Left bar = projected · Target = goal
+            <span className="font-medium text-gray-800">Target (tgt)</span> = goal minutes for
+            the game.{" "}
+            <span className="font-medium text-gray-800">Projected</span> = minutes this plan
+            actually gives (green bar). Diff = projected − target.
+          </p>
+          <p className="mt-1 text-xs text-gray-500">
+            With ~6 min rotations, projected time jumps in chunks (e.g. 25.0 / 31.3 / 37.5), so
+            it rarely matches the target exactly. Locked/edited rotations (and “duplicate 1st
+            half”) freeze those lineups, so the engine can’t rebalance them.
           </p>
         </div>
         <button
           type="button"
           onClick={onRecalculateMinutes}
-          className="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+          className="shrink-0 rounded-lg border border-pitch bg-green-50 px-3 py-1.5 text-xs font-semibold text-pitch hover:bg-green-100"
         >
-          Calculate from plan
+          Refresh play times
         </button>
       </div>
+      <p className="mt-1 text-xs text-gray-500">
+        Refresh updates projected minutes without changing your edited lineups. Applying
+        targets only rebuilds unedited rotations.
+      </p>
 
       <ul className="mt-3 space-y-2">
         {sorted.map((p) => {
@@ -535,13 +575,13 @@ function MinutesTable({
               <span className="w-12 text-right text-sm font-medium tabular-nums">
                 {projected.toFixed(1)}m
               </span>
-              <label className="flex w-16 flex-col items-end">
+              <label className="flex w-14 flex-col items-end">
                 <input
                   type="number"
                   min={0}
                   max={totalMinutes}
                   step={0.5}
-                  value={target}
+                  value={Math.round(target * 10) / 10}
                   onChange={(e) => setTarget(p.id, e.target.value)}
                   className={`w-full rounded border px-1 py-0.5 text-right text-xs tabular-nums ${
                     isOverridden
@@ -571,7 +611,9 @@ function MinutesTable({
         disabled={!hasTargetChanges}
         className="mt-4 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
       >
-        {hasTargetChanges ? "Apply targets & rebuild rotations" : "Edit targets above to rebuild"}
+        {hasTargetChanges
+          ? "Apply targets (keep lineup edits)"
+          : "Edit targets above to rebuild"}
       </button>
 
       {Object.keys(plan.manualTargetOverrides ?? {}).length > 0 && (
