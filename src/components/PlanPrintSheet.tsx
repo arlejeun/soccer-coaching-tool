@@ -18,17 +18,11 @@ function playerLabel(players: Player[], id: string | null | undefined): string {
 
 export default function PlanPrintSheet({ plan, players }: Props) {
   const totalMinutes = plan.settings.halfMinutes * 2;
-  const active = players.filter((p) => plan.activePlayerIds.includes(p.id));
-  const minutes = plan.playerMinutes;
-
-  const sortedByMinutes = [...active].sort(
-    (a, b) => (minutes[a.id] ?? 0) - (minutes[b.id] ?? 0)
-  );
 
   return (
     <div className="plan-print-sheet hidden bg-white text-black print:block">
       <header className="border-b-2 border-black pb-3">
-        <h1 className="text-xl font-bold">U10 Game Plan — Lineup & Rotations</h1>
+        <h1 className="text-xl font-bold">U10 Game Plan — Rotations</h1>
         <p className="mt-1 text-sm">
           {totalMinutes} min game · {plan.settings.segmentsPerHalf} rotations per half ·{" "}
           {plan.settings.subsPerRotation} subs per rotation · 2-3-1
@@ -38,35 +32,7 @@ export default function PlanPrintSheet({ plan, players }: Props) {
         </p>
       </header>
 
-      <section className="mt-4">
-        <h2 className="text-sm font-bold uppercase tracking-wide">Projected playing time</h2>
-        <table className="mt-2 w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-gray-400 text-left">
-              <th className="py-1 pr-2">#</th>
-              <th className="py-1 pr-2">Player</th>
-              <th className="py-1 pr-2 text-right">Projected</th>
-              <th className="py-1 text-right">Target</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedByMinutes.map((p) => (
-              <tr key={p.id} className="border-b border-gray-200">
-                <td className="py-1 pr-2 font-bold">{p.number}</td>
-                <td className="py-1 pr-2">{p.name}</td>
-                <td className="py-1 pr-2 text-right tabular-nums">
-                  {(minutes[p.id] ?? 0).toFixed(1)}m
-                </td>
-                <td className="py-1 text-right tabular-nums">
-                  {(plan.playerTargets[p.id] ?? plan.targetMinutes).toFixed(1)}m
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="mt-6 space-y-4">
+      <section className="mt-4 space-y-4">
         <h2 className="text-sm font-bold uppercase tracking-wide">Rotation schedule</h2>
         {plan.segments.map((segment) => {
           const prevLineup =
