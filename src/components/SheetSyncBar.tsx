@@ -26,10 +26,10 @@ export default function SheetSyncBar({
   const statusLabel: Record<SyncStatus, string> = {
     idle: "Not connected",
     loading: "Loading…",
-    synced: "Synced with Google Sheets",
+    synced: "Synced (roster, coaching, plan)",
     saving: "Saving…",
     error: "Sync error",
-    offline: "Local only",
+    offline: "Local only — plan stays on this device",
   };
 
   const statusColor: Record<SyncStatus, string> = {

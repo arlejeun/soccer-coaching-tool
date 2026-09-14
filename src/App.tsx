@@ -1,49 +1,25 @@
 import { useState } from "react";
 import { INITIAL_ROSTER } from "./data/roster";
-import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useGoogleSheet } from "./hooks/useGoogleSheet";
 import RosterManager from "./components/RosterManager";
 import CoachingInputPanel from "./components/CoachingInput";
 import GamePlanner from "./components/GamePlanner";
 import MatchDay from "./components/MatchDay";
 import SheetSyncBar from "./components/SheetSyncBar";
-import { DEFAULT_SUB_RULES } from "./data/subRules";
-import type { GamePlan, GameSettings, PlayerAvailability, SubstitutionRule } from "./types";
+import type { GameSettings } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
-type Tab = "roster" | "coaching" | "plan" | "match";
+type AppTab = "roster" | "coaching" | "plan" | "match";
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("coaching");
+  const [tab, setTab] = useState<AppTab>("coaching");
   const sheet = useGoogleSheet();
-  const [rawSettings, setGameSettings] = useLocalStorage<
-    Pick<
-      GameSettings,
-      | "halfMinutes"
-      | "segmentsPerHalf"
-      | "subsPerRotation"
-      | "firstHalfKeeperId"
-      | "secondHalfKeeperId"
-    >
-  >("u10-game-settings", {
-    halfMinutes: DEFAULT_SETTINGS.halfMinutes,
-    segmentsPerHalf: DEFAULT_SETTINGS.segmentsPerHalf,
-    subsPerRotation: DEFAULT_SETTINGS.subsPerRotation,
-  });
   const settings: GameSettings = {
     ...DEFAULT_SETTINGS,
-    ...rawSettings,
+    ...sheet.gameSettings,
     meritInfluence: sheet.meritInfluence,
     maxConsecutiveBenchRotations: DEFAULT_SETTINGS.maxConsecutiveBenchRotations,
   };
-  const [gameDayAvailability, setGameDayAvailability] = useLocalStorage<
-    Record<string, PlayerAvailability>
-  >("u10-game-day", {});
-  const [plan, setPlan] = useLocalStorage<GamePlan | null>("u10-plan", null);
-  const [subRules, setSubRules] = useLocalStorage<SubstitutionRule[]>(
-    "u10-sub-rules",
-    DEFAULT_SUB_RULES
-  );
 
   return (
     <div className="mx-auto min-h-screen max-w-lg pb-24 print:block print:max-w-none print:pb-0">
@@ -80,11 +56,11 @@ export default function App() {
             players={sheet.players.length > 0 ? sheet.players : INITIAL_ROSTER}
             settings={settings}
             coachingProfiles={sheet.coachingProfiles}
-            availability={gameDayAvailability}
-            subRules={subRules}
-            plan={plan}
+            availability={sheet.gameDayAvailability}
+            subRules={sheet.subRules}
+            plan={sheet.plan}
             onSettingsChange={(s) =>
-              setGameSettings({
+              sheet.setGameSettings({
                 halfMinutes: s.halfMinutes,
                 segmentsPerHalf: s.segmentsPerHalf,
                 subsPerRotation: s.subsPerRotation,
@@ -92,17 +68,17 @@ export default function App() {
                 secondHalfKeeperId: s.secondHalfKeeperId,
               })
             }
-            onAvailabilityChange={setGameDayAvailability}
-            onSubRulesChange={setSubRules}
-            onPlanChange={setPlan}
+            onAvailabilityChange={sheet.setGameDayAvailability}
+            onSubRulesChange={sheet.setSubRules}
+            onPlanChange={sheet.setPlan}
           />
         )}
         {tab === "match" && (
           <MatchDay
             players={sheet.players.length > 0 ? sheet.players : INITIAL_ROSTER}
-            plan={plan}
-            subRules={subRules}
-            onPlanChange={setPlan}
+            plan={sheet.plan}
+            subRules={sheet.subRules}
+            onPlanChange={sheet.setPlan}
             onBack={() => setTab("plan")}
           />
         )}

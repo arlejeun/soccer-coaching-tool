@@ -1,10 +1,15 @@
 import type { Player, PlayerCoachingInput } from "../types";
 import { normalizeCoachingInput } from "./coachingScore";
+import {
+  type GameDayState,
+  normalizeGameDayState,
+} from "./gameDayState";
 
 export interface SheetData {
   players: Player[];
   coachingProfiles: Record<string, PlayerCoachingInput>;
   meritInfluence: number;
+  gameDayState: GameDayState | null;
 }
 
 export interface SheetSaveResult {
@@ -37,6 +42,20 @@ function unauthorizedError(data: { error?: string }): boolean {
   return data.error === "Unauthorized";
 }
 
+function normalizeSheetPayload(data: {
+  players?: Player[];
+  coachingProfiles?: Record<string, PlayerCoachingInput>;
+  meritInfluence?: number;
+  gameDayState?: unknown;
+}): SheetData {
+  return {
+    players: data.players ?? [],
+    coachingProfiles: normalizeCoachingProfiles(data.coachingProfiles ?? {}),
+    meritInfluence: data.meritInfluence ?? 50,
+    gameDayState: normalizeGameDayState(data.gameDayState),
+  };
+}
+
 /** Apps Script requires text/plain for CORS POST from the browser. */
 async function postToSheet(body: object): Promise<SheetSaveResult> {
   const url = getSheetsUrl();
@@ -50,7 +69,12 @@ async function postToSheet(body: object): Promise<SheetSaveResult> {
     headers: { "Content-Type": "text/plain;charset=utf-8" },
   });
 
-  const data = (await res.json()) as SheetSaveResult;
+  const data = (await res.json()) as SheetSaveResult & {
+    players?: Player[];
+    coachingProfiles?: Record<string, PlayerCoachingInput>;
+    meritInfluence?: number;
+    gameDayState?: unknown;
+  };
   if (unauthorizedError(data)) {
     return { ok: false, error: "Invalid shared secret" };
   }
@@ -58,7 +82,12 @@ async function postToSheet(body: object): Promise<SheetSaveResult> {
     return { ok: false, error: data.error ?? `Save failed (${res.status})` };
   }
 
-  return data;
+  return {
+    ok: true,
+    data: data.data
+      ? normalizeSheetPayload(data.data)
+      : normalizeSheetPayload(data),
+  };
 }
 
 export async function loadFromSheet(): Promise<SheetData> {
@@ -80,11 +109,7 @@ export async function loadFromSheet(): Promise<SheetData> {
     throw new Error(data.error ?? `Load failed (${res.status})`);
   }
 
-  return {
-    players: data.players ?? [],
-    coachingProfiles: normalizeCoachingProfiles(data.coachingProfiles ?? {}),
-    meritInfluence: data.meritInfluence ?? 50,
-  };
+  return normalizeSheetPayload(data);
 }
 
 function normalizeCoachingProfiles(
@@ -106,10 +131,21 @@ export async function saveCoachingToSheet(
   return postToSheet({ action: "saveCoaching", profiles, meritInfluence });
 }
 
+export async function saveGameDayToSheet(gameDayState: GameDayState): Promise<SheetSaveResult> {
+  return postToSheet({ action: "saveGameDay", gameDayState });
+}
+
 export async function saveAllToSheet(
   players: Player[],
   profiles: Record<string, PlayerCoachingInput>,
-  meritInfluence: number
+  meritInfluence: number,
+  gameDayState?: GameDayState | null
 ): Promise<SheetSaveResult> {
-  return postToSheet({ action: "saveAll", players, profiles, meritInfluence });
+  return postToSheet({
+    action: "saveAll",
+    players,
+    profiles,
+    meritInfluence,
+    gameDayState: gameDayState ?? undefined,
+  });
 }

@@ -81,6 +81,7 @@ function setupSheet() {
     ["key", "value"],
     ["meritInfluence", 50],
   ]);
+  // gameDayState is written as a JSON string when the app saves a plan.
 
   SpreadsheetApp.flush();
 }
@@ -109,11 +110,16 @@ function doPost(e) {
       if (body.meritInfluence !== undefined) {
         writeSetting("meritInfluence", body.meritInfluence);
       }
+    } else if (body.action === "saveGameDay") {
+      writeGameDayState(body.gameDayState || null);
     } else if (body.action === "saveAll") {
       writeRoster(body.players || []);
       writeCoaching(body.profiles || {});
       if (body.meritInfluence !== undefined) {
         writeSetting("meritInfluence", body.meritInfluence);
+      }
+      if (body.gameDayState !== undefined) {
+        writeGameDayState(body.gameDayState || null);
       }
     } else {
       return jsonResponse({ ok: false, error: "Unknown action" });
@@ -128,8 +134,27 @@ function loadAll() {
   return {
     players: readRoster(),
     coachingProfiles: readCoaching(),
-    meritInfluence: readSetting("meritInfluence", 50),
+    meritInfluence: readSettingNumber("meritInfluence", 50),
+    gameDayState: readGameDayState(),
   };
+}
+
+function readGameDayState() {
+  var raw = readSettingRaw("gameDayState", "");
+  if (!raw) return null;
+  try {
+    return JSON.parse(String(raw));
+  } catch (err) {
+    return null;
+  }
+}
+
+function writeGameDayState(state) {
+  if (!state) {
+    writeSetting("gameDayState", "");
+    return;
+  }
+  writeSetting("gameDayState", JSON.stringify(state));
 }
 
 function readRoster() {
@@ -232,14 +257,24 @@ function writeCoaching(profiles) {
   sheet.getRange(2, 1, rows.length, 5).setValues(rows);
 }
 
-function readSetting(key, defaultValue) {
+function readSettingRaw(key, defaultValue) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SETTINGS_SHEET);
   if (!sheet) return defaultValue;
   const rows = sheet.getDataRange().getValues();
   for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === key) return Number(rows[i][1]) || defaultValue;
+    if (String(rows[i][0]) === key) {
+      var value = rows[i][1];
+      if (value === "" || value === null || value === undefined) return defaultValue;
+      return value;
+    }
   }
   return defaultValue;
+}
+
+function readSettingNumber(key, defaultValue) {
+  var value = readSettingRaw(key, defaultValue);
+  var num = Number(value);
+  return isNaN(num) ? defaultValue : num;
 }
 
 function writeSetting(key, value) {

@@ -1,8 +1,6 @@
 # Google Sheets Setup
 
-Roster and coaching ratings are stored in a **Google Spreadsheet** and sync automatically when you edit them in the app.
-
-Game-day settings (availability, substitution plan, match clock) stay in your browser.
+Roster, coaching ratings, and the **game plan** (rotations, availability, keepers, sub rules) sync to a **Google Spreadsheet**. The app also keeps a local backup on the device.
 
 ## One-time setup (~10 minutes)
 
@@ -41,7 +39,7 @@ Game-day settings (availability, substitution plan, match clock) stay in your br
 2. Expand **Google Sheets** in the header
 3. Paste the **Web app URL** and the **same shared secret** → **Connect**
 
-You should see **Synced with Google Sheets**. Your roster from the sheet loads automatically.
+You should see **Synced (roster, coaching, plan)**. Your roster and any saved plan from the sheet load automatically.
 
 ## Spreadsheet layout
 
@@ -68,6 +66,13 @@ Scores are 1–5. `practice` = practice & effort at training; `performance` = sk
 | key | value |
 |-----|-------|
 | meritInfluence | 50 |
+| gameDayState | `{...}` JSON blob of the current plan |
+
+`gameDayState` is written automatically when you generate or edit a plan. Do not edit that cell by hand.
+
+## Redeploy after script updates
+
+If you update `Code.gs` (for example to add plan sync), paste the new script and **Deploy → Manage deployments → Edit → New version**. The web app URL can stay the same.
 
 ## Security
 
