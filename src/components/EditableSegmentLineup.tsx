@@ -19,6 +19,10 @@ interface Props {
   players: Player[];
   subRules: SubstitutionRule[];
   onPlanChange: (plan: GamePlan) => void;
+  /** Live draft lineup for minutes preview while editing. */
+  onDraftPreview?: (
+    draft: { segmentIndex: number; lineup: Record<string, string | null> } | null
+  ) => void;
 }
 
 export default function EditableSegmentLineup({
@@ -27,6 +31,7 @@ export default function EditableSegmentLineup({
   players,
   subRules,
   onPlanChange,
+  onDraftPreview,
 }: Props) {
   const segment = plan.segments[segmentIndex];
   const [editing, setEditing] = useState(false);
@@ -39,6 +44,12 @@ export default function EditableSegmentLineup({
       setDraftLineup({ ...segment.lineup });
     }
   }, [segment.lineup, editing]);
+
+  useEffect(() => {
+    if (!onDraftPreview || !editing) return;
+    onDraftPreview({ segmentIndex, lineup: draftLineup });
+    return () => onDraftPreview(null);
+  }, [editing, draftLineup, segmentIndex, onDraftPreview]);
 
   const warnings = editing
     ? checkLineupWarnings(draftLineup, plan.activePlayerIds, players, subRules)

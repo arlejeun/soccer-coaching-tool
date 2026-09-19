@@ -24,8 +24,14 @@ export default function App() {
   };
   const activeLabel = gameLabel(sheet.activeGame);
 
+  const wideLayout = tab === "plan" || tab === "match";
+
   return (
-    <div className="mx-auto min-h-screen max-w-lg pb-24 print:block print:max-w-none print:pb-0">
+    <div
+      className={`mx-auto min-h-screen pb-24 print:block print:max-w-none print:pb-0 ${
+        wideLayout ? "max-w-lg md:max-w-6xl" : "max-w-lg"
+      }`}
+    >
       <header className="sticky top-0 z-10 bg-pitch text-white shadow-md print:hidden">
         <div className="px-4 py-4">
           <h1 className="text-xl font-bold">U10 Sub Manager</h1>
@@ -104,7 +110,7 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white shadow-lg print:hidden">
-        <div className="mx-auto flex max-w-lg">
+        <div className={`mx-auto flex ${wideLayout ? "max-w-lg md:max-w-6xl" : "max-w-lg"}`}>
           {(
             [
               { id: "roster" as const, label: "Roster", icon: "👥" },

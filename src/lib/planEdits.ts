@@ -114,6 +114,26 @@ function cloneSegments(segments: SegmentAssignment[]): SegmentAssignment[] {
   }));
 }
 
+/** Live minutes preview while editing a rotation (does not lock/save). */
+export function previewPlanWithLineup(
+  plan: GamePlan,
+  segmentIndex: number,
+  lineup: Record<string, string | null>
+): GamePlan {
+  if (segmentIndex < 0 || segmentIndex >= plan.segments.length) return plan;
+  const segments = cloneSegments(plan.segments);
+  segments[segmentIndex] = {
+    ...segments[segmentIndex],
+    lineup: { ...lineup },
+    bench: getBench(plan.activePlayerIds, lineup),
+  };
+  const next: GamePlan = { ...plan, segments };
+  return {
+    ...next,
+    playerMinutes: calculatePlayerMinutesFromPlan(next),
+  };
+}
+
 /** Who can be assigned to a lineup slot — any active player (coach override). */
 export function getLineupSlotCandidates(
   plan: GamePlan,
