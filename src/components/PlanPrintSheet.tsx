@@ -7,6 +7,7 @@ import { slotLabel } from "../lib/planEdits";
 interface Props {
   plan: GamePlan;
   players: Player[];
+  gameTitle?: string;
 }
 
 function playerLabel(players: Player[], id: string | null | undefined): string {
@@ -16,13 +17,14 @@ function playerLabel(players: Player[], id: string | null | undefined): string {
   return `#${p.number} ${p.name}`;
 }
 
-export default function PlanPrintSheet({ plan, players }: Props) {
+export default function PlanPrintSheet({ plan, players, gameTitle }: Props) {
   const totalMinutes = plan.settings.halfMinutes * 2;
 
   return (
     <div className="plan-print-sheet hidden bg-white text-black print:block">
       <header className="border-b-2 border-black pb-3">
         <h1 className="text-xl font-bold">U10 Game Plan — Rotations</h1>
+        {gameTitle && <p className="mt-1 text-base font-semibold">{gameTitle}</p>}
         <p className="mt-1 text-sm">
           {totalMinutes} min game · {plan.settings.segmentsPerHalf} rotations per half ·{" "}
           {plan.settings.subsPerRotation} subs per rotation · 2-3-1

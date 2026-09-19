@@ -55,16 +55,15 @@ export function getSubInCandidates(
     .map((id) => playerMap.get(id))
     .filter((p): p is Player => !!p);
 
-  if (slot?.id === "gk") {
-    return candidates
-      .filter((p) => canPlayGoalkeeper(p) || p.id === sub.inPlayerId)
-      .sort((a, b) => a.number - b.number);
-  }
-
+  // Manual edits can put anyone from the previous bench into any seat
+  // (including GK / out of natural position). Sort preferred fits first.
   const sorted = [...candidates].sort((a, b) => {
     if (!slot) return a.number - b.number;
-    const fitDiff = positionFit(b, slot.position) - positionFit(a, slot.position);
-    if (fitDiff !== 0) return fitDiff;
+    const fitA =
+      slot.id === "gk" ? (canPlayGoalkeeper(a) ? 2 : 0) : positionFit(a, slot.position);
+    const fitB =
+      slot.id === "gk" ? (canPlayGoalkeeper(b) ? 2 : 0) : positionFit(b, slot.position);
+    if (fitB !== fitA) return fitB - fitA;
     return a.number - b.number;
   });
 
@@ -85,9 +84,12 @@ export function subInCandidateLabel(
   const base = `#${player.number} ${player.name}`;
   if (exchangeSlotLabel) return `${base} (exchange with ${exchangeSlotLabel})`;
   if (!slot) return base;
+  if (slot.id === "gk") {
+    return canPlayGoalkeeper(player) ? base : `${base} (out of position)`;
+  }
   const fit = positionFit(player, slot.position);
   if (fit === 0) return `${base} (out of position)`;
-  if (fit === 1) return `${base} (secondary ${slot.label})`;
+  if (fit === 1) return `${base} (secondary / cover)`;
   return base;
 }
 
@@ -100,7 +102,7 @@ export function getSubInCandidateHint(
   const segment = plan.segments[segmentIndex];
   const otherIns = segment.substitutions.filter((_, i) => i !== subIndex).length;
   if (otherIns === 0) return null;
-  return `All ${otherIns + 1} bench players listed. Picking someone already coming in elsewhere exchanges those two slots.`;
+  return `All ${otherIns + 1} bench players listed (any position). Picking someone already coming in elsewhere exchanges those two slots.`;
 }
 
 function cloneSegments(segments: SegmentAssignment[]): SegmentAssignment[] {
@@ -112,45 +114,81 @@ function cloneSegments(segments: SegmentAssignment[]): SegmentAssignment[] {
   }));
 }
 
-/** Who can be assigned to a starting lineup slot. */
+/** Live minutes preview while editing a rotation (does not lock/save). */
+export function previewPlanWithLineup(
+  plan: GamePlan,
+  segmentIndex: number,
+  lineup: Record<string, string | null>
+): GamePlan {
+  if (segmentIndex < 0 || segmentIndex >= plan.segments.length) return plan;
+  const segments = cloneSegments(plan.segments);
+  segments[segmentIndex] = {
+    ...segments[segmentIndex],
+    lineup: { ...lineup },
+    bench: getBench(plan.activePlayerIds, lineup),
+  };
+  const next: GamePlan = { ...plan, segments };
+  return {
+    ...next,
+    playerMinutes: calculatePlayerMinutesFromPlan(next),
+  };
+}
+
+/** Who can be assigned to a lineup slot — any active player (coach override). */
 export function getLineupSlotCandidates(
   plan: GamePlan,
   slotId: string,
-  draftLineup: Record<string, string | null>,
+  _draftLineup: Record<string, string | null>,
   players: Player[]
 ): Player[] {
   const slot = FORMATION_231.find((s) => s.id === slotId);
   if (!slot) return [];
 
-  const currentId = draftLineup[slotId];
-  const playerMap = new Map(players.map((p) => [p.id, p]));
+  const fitOf = (p: Player) =>
+    slot.id === "gk"
+      ? canPlayGoalkeeper(p)
+        ? 2
+        : 0
+      : positionFit(p, slot.position);
 
-  const eligible = players.filter((p) => {
-    if (!plan.activePlayerIds.includes(p.id)) return false;
-    if (slotId === "gk") return canPlayGoalkeeper(p);
-    return canPlayPosition(p, slot.position);
-  });
+  return players
+    .filter((p) => plan.activePlayerIds.includes(p.id))
+    .sort((a, b) => {
+      const fitDiff = fitOf(b) - fitOf(a);
+      if (fitDiff !== 0) return fitDiff;
+      return a.number - b.number;
+    });
+}
 
-  const ids = new Set<string>();
-  const result: Player[] = [];
+export function lineupSlotCandidateTag(
+  player: Player,
+  slotId: string,
+  draftLineup: Record<string, string | null>,
+  draftBench: string[],
+  displacedLabel: string | null
+): string {
+  const onFieldElsewhere = Object.entries(draftLineup).some(
+    ([id, pid]) => id !== slotId && pid === player.id
+  );
+  if (onFieldElsewhere) return " (swap positions — minutes unchanged)";
 
-  const add = (p: Player | undefined) => {
-    if (!p || ids.has(p.id)) return;
-    ids.add(p.id);
-    result.push(p);
-  };
+  const slot = FORMATION_231.find((s) => s.id === slotId);
+  const outOfPosition =
+    slot &&
+    (slot.id === "gk"
+      ? !canPlayGoalkeeper(player)
+      : positionFit(player, slot.position) === 0);
 
-  if (currentId) add(playerMap.get(currentId));
-
-  for (const p of eligible) {
-    const inOtherSlot = Object.entries(draftLineup).some(
-      ([id, pid]) => id !== slotId && pid === p.id
-    );
-    if (!inOtherSlot) add(p);
-    else add(p);
+  if (draftBench.includes(player.id) && displacedLabel) {
+    return outOfPosition
+      ? ` (from bench, replaces ${displacedLabel}, out of position)`
+      : ` (from bench, replaces ${displacedLabel})`;
   }
-
-  return result.sort((a, b) => a.number - b.number);
+  if (draftBench.includes(player.id)) {
+    return outOfPosition ? " (from bench, out of position)" : " (from bench)";
+  }
+  if (outOfPosition) return " (out of position)";
+  return "";
 }
 
 export function setLineupSlotPlayer(

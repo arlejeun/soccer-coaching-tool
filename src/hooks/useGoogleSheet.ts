@@ -2,10 +2,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { INITIAL_ROSTER } from "../data/roster";
 import {
   type GameDayState,
+  type SavedGame,
   type StoredGameSettings,
+  addGame,
+  deleteGame,
+  getActiveGame,
+  hasAnyPlan,
   isGameDayNewer,
   loadGameDayStateFromLocal,
-  touchGameDayState,
+  normalizeGameDayState,
+  patchActiveGame,
+  renameGame,
+  setActiveGameId,
   writeGameDayStateToLocal,
 } from "../lib/gameDayState";
 import {
@@ -41,16 +49,7 @@ interface SheetState {
   lastSynced: Date | null;
 }
 
-function applyGameDayPatch(
-  prev: GameDayState,
-  patch: Partial<Omit<GameDayState, "updatedAt">>
-): GameDayState {
-  const next = touchGameDayState({
-    plan: patch.plan !== undefined ? patch.plan : prev.plan,
-    gameSettings: patch.gameSettings ?? prev.gameSettings,
-    gameDayAvailability: patch.gameDayAvailability ?? prev.gameDayAvailability,
-    subRules: patch.subRules ?? prev.subRules,
-  });
+function persistGameDay(next: GameDayState): GameDayState {
   writeGameDayStateToLocal(next);
   return next;
 }
@@ -88,17 +87,19 @@ export function useGoogleSheet() {
     try {
       const data = await loadFromSheet();
       const localGameDay = stateRef.current.gameDay;
+      const remote = data.gameDayState
+        ? normalizeGameDayState(data.gameDayState)
+        : null;
       let gameDay = localGameDay;
       let shouldPushLocalGameDay = false;
 
-      if (data.gameDayState && isGameDayNewer(data.gameDayState, localGameDay)) {
-        gameDay = data.gameDayState;
+      if (remote && isGameDayNewer(remote, localGameDay)) {
+        gameDay = remote;
         writeGameDayStateToLocal(gameDay);
       } else if (
-        localGameDay.plan &&
-        (data.gameDayState == null || isGameDayNewer(localGameDay, data.gameDayState))
+        hasAnyPlan(localGameDay) &&
+        (remote == null || isGameDayNewer(localGameDay, remote))
       ) {
-        // Local plan exists / is newer — keep it and push up after load.
         shouldPushLocalGameDay = true;
       }
 
@@ -113,7 +114,7 @@ export function useGoogleSheet() {
         lastSynced: new Date(),
       });
 
-      if (shouldPushLocalGameDay && localGameDay.plan) {
+      if (shouldPushLocalGameDay) {
         pendingSave.current.add("gameDay");
         if (saveTimer.current) clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
@@ -179,7 +180,6 @@ export function useGoogleSheet() {
     refresh();
   }, [refresh]);
 
-  // Flush pending cloud saves + local snapshot when leaving the page / app.
   useEffect(() => {
     const persistNow = () => {
       writeGameDayStateToLocal(stateRef.current.gameDay);
@@ -207,6 +207,14 @@ export function useGoogleSheet() {
       void flushSaveRef.current();
     }, 1200);
   }, []);
+
+  const updateGameDay = useCallback(
+    (updater: (prev: GameDayState) => GameDayState) => {
+      setState((s) => ({ ...s, gameDay: persistGameDay(updater(s.gameDay)) }));
+      scheduleSave("gameDay");
+    },
+    [scheduleSave]
+  );
 
   const setPlayers = useCallback(
     (players: Player[] | ((prev: Player[]) => Player[])) => {
@@ -247,13 +255,13 @@ export function useGoogleSheet() {
 
   const setPlan = useCallback(
     (plan: GamePlan | null | ((prev: GamePlan | null) => GamePlan | null)) => {
-      setState((s) => {
-        const nextPlan = typeof plan === "function" ? plan(s.gameDay.plan) : plan;
-        return { ...s, gameDay: applyGameDayPatch(s.gameDay, { plan: nextPlan }) };
+      updateGameDay((gd) => {
+        const active = getActiveGame(gd);
+        const nextPlan = typeof plan === "function" ? plan(active.plan) : plan;
+        return patchActiveGame(gd, { plan: nextPlan });
       });
-      scheduleSave("gameDay");
     },
-    [scheduleSave]
+    [updateGameDay]
   );
 
   const setGameSettings = useCallback(
@@ -262,14 +270,14 @@ export function useGoogleSheet() {
         | StoredGameSettings
         | ((prev: StoredGameSettings) => StoredGameSettings)
     ) => {
-      setState((s) => {
+      updateGameDay((gd) => {
+        const active = getActiveGame(gd);
         const next =
-          typeof settings === "function" ? settings(s.gameDay.gameSettings) : settings;
-        return { ...s, gameDay: applyGameDayPatch(s.gameDay, { gameSettings: next }) };
+          typeof settings === "function" ? settings(active.gameSettings) : settings;
+        return patchActiveGame(gd, { gameSettings: next });
       });
-      scheduleSave("gameDay");
     },
-    [scheduleSave]
+    [updateGameDay]
   );
 
   const setGameDayAvailability = useCallback(
@@ -278,19 +286,16 @@ export function useGoogleSheet() {
         | Record<string, PlayerAvailability>
         | ((prev: Record<string, PlayerAvailability>) => Record<string, PlayerAvailability>)
     ) => {
-      setState((s) => {
+      updateGameDay((gd) => {
+        const active = getActiveGame(gd);
         const next =
           typeof availability === "function"
-            ? availability(s.gameDay.gameDayAvailability)
+            ? availability(active.gameDayAvailability)
             : availability;
-        return {
-          ...s,
-          gameDay: applyGameDayPatch(s.gameDay, { gameDayAvailability: next }),
-        };
+        return patchActiveGame(gd, { gameDayAvailability: next });
       });
-      scheduleSave("gameDay");
     },
-    [scheduleSave]
+    [updateGameDay]
   );
 
   const setSubRules = useCallback(
@@ -299,13 +304,47 @@ export function useGoogleSheet() {
         | SubstitutionRule[]
         | ((prev: SubstitutionRule[]) => SubstitutionRule[])
     ) => {
-      setState((s) => {
-        const next = typeof rules === "function" ? rules(s.gameDay.subRules) : rules;
-        return { ...s, gameDay: applyGameDayPatch(s.gameDay, { subRules: next }) };
+      updateGameDay((gd) => {
+        const next = typeof rules === "function" ? rules(gd.subRules) : rules;
+        return { ...gd, subRules: next, updatedAt: new Date().toISOString() };
       });
-      scheduleSave("gameDay");
     },
-    [scheduleSave]
+    [updateGameDay]
+  );
+
+  const selectGame = useCallback(
+    (gameId: string) => {
+      updateGameDay((gd) => setActiveGameId(gd, gameId));
+    },
+    [updateGameDay]
+  );
+
+  const createGame = useCallback(
+    (name?: string) => {
+      updateGameDay((gd) => addGame(gd, { name }));
+    },
+    [updateGameDay]
+  );
+
+  const duplicateActiveGame = useCallback(
+    (name?: string) => {
+      updateGameDay((gd) => addGame(gd, { copyFromActive: true, name }));
+    },
+    [updateGameDay]
+  );
+
+  const removeGame = useCallback(
+    (gameId: string) => {
+      updateGameDay((gd) => deleteGame(gd, gameId));
+    },
+    [updateGameDay]
+  );
+
+  const updateGameMeta = useCallback(
+    (gameId: string, name: string, meta?: { opponent?: string; when?: string }) => {
+      updateGameDay((gd) => renameGame(gd, gameId, name, meta));
+    },
+    [updateGameDay]
   );
 
   const configure = useCallback(
@@ -316,13 +355,18 @@ export function useGoogleSheet() {
     [refresh]
   );
 
+  const active = getActiveGame(state.gameDay);
+
   return {
     players: state.players,
     coachingProfiles: state.coachingProfiles,
     meritInfluence: state.meritInfluence,
-    plan: state.gameDay.plan,
-    gameSettings: state.gameDay.gameSettings,
-    gameDayAvailability: state.gameDay.gameDayAvailability,
+    games: state.gameDay.games as SavedGame[],
+    activeGameId: state.gameDay.activeGameId,
+    activeGame: active,
+    plan: active.plan,
+    gameSettings: active.gameSettings,
+    gameDayAvailability: active.gameDayAvailability,
     subRules: state.gameDay.subRules,
     syncStatus: state.syncStatus,
     syncError: state.syncError,
@@ -335,6 +379,11 @@ export function useGoogleSheet() {
     setGameSettings,
     setGameDayAvailability,
     setSubRules,
+    selectGame,
+    createGame,
+    duplicateActiveGame,
+    removeGame,
+    updateGameMeta,
     refresh,
     configure,
   };

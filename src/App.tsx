@@ -6,6 +6,8 @@ import CoachingInputPanel from "./components/CoachingInput";
 import GamePlanner from "./components/GamePlanner";
 import MatchDay from "./components/MatchDay";
 import SheetSyncBar from "./components/SheetSyncBar";
+import GameSwitcher from "./components/GameSwitcher";
+import { gameLabel } from "./lib/gameDayState";
 import type { GameSettings } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
@@ -20,9 +22,16 @@ export default function App() {
     meritInfluence: sheet.meritInfluence,
     maxConsecutiveBenchRotations: DEFAULT_SETTINGS.maxConsecutiveBenchRotations,
   };
+  const activeLabel = gameLabel(sheet.activeGame);
+
+  const wideLayout = tab === "plan" || tab === "match";
 
   return (
-    <div className="mx-auto min-h-screen max-w-lg pb-24 print:block print:max-w-none print:pb-0">
+    <div
+      className={`mx-auto min-h-screen pb-24 print:block print:max-w-none print:pb-0 ${
+        wideLayout ? "max-w-lg md:max-w-6xl" : "max-w-lg"
+      }`}
+    >
       <header className="sticky top-0 z-10 bg-pitch text-white shadow-md print:hidden">
         <div className="px-4 py-4">
           <h1 className="text-xl font-bold">U10 Sub Manager</h1>
@@ -51,6 +60,19 @@ export default function App() {
             onMeritInfluenceChange={sheet.setMeritInfluence}
           />
         )}
+        {(tab === "plan" || tab === "match") && (
+          <div className="mb-4">
+            <GameSwitcher
+              games={sheet.games}
+              activeGameId={sheet.activeGameId}
+              onSelect={sheet.selectGame}
+              onCreate={sheet.createGame}
+              onDuplicate={sheet.duplicateActiveGame}
+              onDelete={sheet.removeGame}
+              onRename={sheet.updateGameMeta}
+            />
+          </div>
+        )}
         {tab === "plan" && (
           <GamePlanner
             players={sheet.players.length > 0 ? sheet.players : INITIAL_ROSTER}
@@ -59,6 +81,7 @@ export default function App() {
             availability={sheet.gameDayAvailability}
             subRules={sheet.subRules}
             plan={sheet.plan}
+            gameTitle={activeLabel}
             onSettingsChange={(s) =>
               sheet.setGameSettings({
                 halfMinutes: s.halfMinutes,
@@ -78,6 +101,8 @@ export default function App() {
             players={sheet.players.length > 0 ? sheet.players : INITIAL_ROSTER}
             plan={sheet.plan}
             subRules={sheet.subRules}
+            gameId={sheet.activeGameId}
+            gameTitle={activeLabel}
             onPlanChange={sheet.setPlan}
             onBack={() => setTab("plan")}
           />
@@ -85,7 +110,7 @@ export default function App() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white shadow-lg print:hidden">
-        <div className="mx-auto flex max-w-lg">
+        <div className={`mx-auto flex ${wideLayout ? "max-w-lg md:max-w-6xl" : "max-w-lg"}`}>
           {(
             [
               { id: "roster" as const, label: "Roster", icon: "👥" },

@@ -632,15 +632,37 @@ function addSegmentMinutes(
 
 /** Sum on-field minutes from each segment of an existing plan. */
 export function calculatePlayerMinutesFromPlan(plan: GamePlan): Record<string, number> {
-  let minutes: Record<string, number> = {};
+  return calculatePlayerHalfMinutesFromPlan(plan).total;
+}
+
+/** Projected minutes split by half (and total) from current lineups. */
+export function calculatePlayerHalfMinutesFromPlan(plan: GamePlan): {
+  firstHalf: Record<string, number>;
+  secondHalf: Record<string, number>;
+  total: Record<string, number>;
+} {
+  let firstHalf: Record<string, number> = {};
+  let secondHalf: Record<string, number> = {};
+
   for (const segment of plan.segments) {
     const duration = segment.endMinute - segment.startMinute;
-    minutes = addSegmentMinutes(minutes, segment.lineup, duration);
+    if (segment.half === 1) {
+      firstHalf = addSegmentMinutes(firstHalf, segment.lineup, duration);
+    } else {
+      secondHalf = addSegmentMinutes(secondHalf, segment.lineup, duration);
+    }
   }
+
+  const total: Record<string, number> = {};
   for (const id of plan.activePlayerIds) {
-    if (minutes[id] === undefined) minutes[id] = 0;
+    const h1 = firstHalf[id] ?? 0;
+    const h2 = secondHalf[id] ?? 0;
+    firstHalf[id] = h1;
+    secondHalf[id] = h2;
+    total[id] = h1 + h2;
   }
-  return minutes;
+
+  return { firstHalf, secondHalf, total };
 }
 
 export function generateGamePlan(

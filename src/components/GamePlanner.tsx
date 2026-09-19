@@ -1,13 +1,14 @@
 import type { GamePlan, GameSettings, Player, PlayerCoachingInput, PlayerAvailability, SubstitutionRule } from "../types";
 import {
   formatMinute,
+  calculatePlayerHalfMinutesFromPlan,
   calculatePlayerMinutesFromPlan,
   generateGamePlan,
   getGoalkeeperCandidates,
   getPlayerById,
   validateRoster,
 } from "../lib/substitutionEngine";
-import { applyStartingLineupChange, duplicateFirstHalfToSecondHalf, rebuildKeepingManualEdits, slotLabel } from "../lib/planEdits";
+import { applyStartingLineupChange, duplicateFirstHalfToSecondHalf, previewPlanWithLineup, rebuildKeepingManualEdits, slotLabel } from "../lib/planEdits";
 import { getAvailablePlayers } from "../lib/availability";
 import { computePlayerTargets, resolvePlayerTargets } from "../lib/coachingScore";
 import GameDayAvailability from "./GameDayAvailability";
@@ -18,7 +19,7 @@ import PlanPrintSheet, { printGamePlan } from "./PlanPrintSheet";
 import { POSITION_COLORS } from "../types";
 import { ABSENCE_REASON_LABELS } from "../lib/availability";
 import { benchSubIndex, getBenchSubstitutions, getFieldShuffles } from "../lib/subDisplay";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 interface Props {
   players: Player[];
@@ -27,6 +28,7 @@ interface Props {
   availability: Record<string, PlayerAvailability>;
   subRules: SubstitutionRule[];
   plan: GamePlan | null;
+  gameTitle?: string;
   onSettingsChange: (settings: GameSettings) => void;
   onAvailabilityChange: (availability: Record<string, PlayerAvailability>) => void;
   onSubRulesChange: (rules: SubstitutionRule[]) => void;
@@ -40,6 +42,7 @@ export default function GamePlanner({
   availability,
   subRules,
   plan,
+  gameTitle,
   onSettingsChange,
   onAvailabilityChange,
   onSubRulesChange,
@@ -50,6 +53,26 @@ export default function GamePlanner({
   const warnings = validateRoster(availablePlayers, { forGameDay: true });
   const blocking = availablePlayers.length < 7;
   const totalMinutes = settings.halfMinutes * 2;
+
+  const [draftPreview, setDraftPreview] = useState<{
+    segmentIndex: number;
+    lineup: Record<string, string | null>;
+  } | null>(null);
+
+  const handleDraftPreview = useCallback(
+    (
+      draft: { segmentIndex: number; lineup: Record<string, string | null> } | null
+    ) => {
+      setDraftPreview(draft);
+    },
+    []
+  );
+
+  const minutesPlan = useMemo(() => {
+    if (!plan) return null;
+    if (!draftPreview) return plan;
+    return previewPlanWithLineup(plan, draftPreview.segmentIndex, draftPreview.lineup);
+  }, [plan, draftPreview]);
 
   const handleGenerate = (
     overrides: Record<string, number> = plan?.manualTargetOverrides ?? {},
@@ -279,7 +302,7 @@ export default function GamePlanner({
         </div>
       )}
 
-      {plan && (
+      {plan && minutesPlan && (
         <>
           <div className="flex gap-2">
             <button
@@ -297,22 +320,26 @@ export default function GamePlanner({
             </button>
           </div>
 
-          <MinutesTable
-            plan={plan}
-            players={players.filter((p) =>
-              (plan.activePlayerIds ?? players.map((x) => x.id)).includes(p.id)
-            )}
-            coachingProfiles={coachingProfiles}
-            onRegenerate={handleRebuildKeepingEdits}
-            onRecalculateMinutes={() =>
-              onPlanChange({
-                ...plan,
-                playerMinutes: calculatePlayerMinutesFromPlan(plan),
-              })
-            }
-          />
+          <div className="md:grid md:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)] md:items-start md:gap-5">
+            <aside className="mb-4 md:order-2 md:mb-0 md:sticky md:top-28 md:max-h-[calc(100vh-8rem)] md:overflow-y-auto md:self-start">
+              <MinutesTable
+                plan={minutesPlan}
+                players={players.filter((p) =>
+                  (plan.activePlayerIds ?? players.map((x) => x.id)).includes(p.id)
+                )}
+                coachingProfiles={coachingProfiles}
+                previewing={Boolean(draftPreview)}
+                onRegenerate={handleRebuildKeepingEdits}
+                onRecalculateMinutes={() =>
+                  onPlanChange({
+                    ...plan,
+                    playerMinutes: calculatePlayerMinutesFromPlan(plan),
+                  })
+                }
+              />
+            </aside>
 
-          <div className="space-y-3">
+            <div className="space-y-3 md:order-1">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-semibold text-gray-900">Rotation Schedule</h3>
               <button
@@ -412,6 +439,7 @@ export default function GamePlanner({
                       players={players}
                       subRules={subRules}
                       onPlanChange={onPlanChange}
+                      onDraftPreview={handleDraftPreview}
                     />
                   </div>
                   <div>
@@ -435,6 +463,7 @@ export default function GamePlanner({
               </div>
               );
             })}
+            </div>
           </div>
         </>
       )}
@@ -449,6 +478,7 @@ export default function GamePlanner({
     {plan && (
       <PlanPrintSheet
         plan={plan}
+        gameTitle={gameTitle}
         players={players.filter((p) =>
           (plan.activePlayerIds ?? players.map((x) => x.id)).includes(p.id)
         )}
@@ -464,19 +494,23 @@ function MinutesTable({
   coachingProfiles,
   onRegenerate,
   onRecalculateMinutes,
+  previewing = false,
 }: {
   plan: GamePlan;
   players: Player[];
   coachingProfiles: Record<string, PlayerCoachingInput>;
   onRegenerate: (overrides: Record<string, number>) => void;
   onRecalculateMinutes: () => void;
+  previewing?: boolean;
 }) {
-  const totalMinutes = plan.settings.halfMinutes * 2;
+  const halfMinutes = plan.settings.halfMinutes;
+  const totalMinutes = halfMinutes * 2;
   // Always derive from current pitches so edits can't leave stale totals.
-  const projectedMinutes = useMemo(
-    () => calculatePlayerMinutesFromPlan(plan),
+  const halfBreakdown = useMemo(
+    () => calculatePlayerHalfMinutesFromPlan(plan),
     [plan]
   );
+  const projectedMinutes = halfBreakdown.total;
   const coachingTargets = useMemo(
     () =>
       computePlayerTargets(
@@ -524,22 +558,29 @@ function MinutesTable({
   };
 
   return (
-    <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200">
+    <div
+      className={`rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200 ${
+        previewing ? "ring-2 ring-pitch shadow-md" : ""
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-semibold text-gray-900">Projected Playing Time</h3>
-          <p className="text-sm text-gray-600">
-            <span className="font-medium text-gray-800">Target (tgt)</span> = goal minutes for
-            the game.{" "}
-            <span className="font-medium text-gray-800">Projected</span> = minutes this plan
-            actually gives (green bar). Diff = projected − target.
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-semibold text-gray-900">Projected Playing Time</h3>
+            {previewing && (
+              <span className="rounded-full bg-pitch/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pitch">
+                Live preview
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-gray-500 md:hidden">
+            H1 / H2 / total vs target for this plan.
           </p>
-          <p className="mt-1 text-xs text-gray-500">
-            With ~6 min rotations, projected time jumps in chunks (e.g. 25.0 / 31.3 / 37.5), so
-            it rarely matches the target exactly. Locked/edited rotations (and “duplicate 1st
-            half”) freeze those lineups, so the engine can’t rebalance them. Swapping two
-            players who are both already on the pitch only changes positions — minutes stay
-            the same.
+          <p className="mt-1 hidden text-sm text-gray-600 md:block">
+            <span className="font-medium text-gray-800">H1 / H2</span> = projected minutes each
+            half. <span className="font-medium text-gray-800">Tot</span> = full game.{" "}
+            <span className="font-medium text-gray-800">tgt</span> = goal. Diff = tot − target.
+            {previewing ? " Updates live while you edit positions." : ""}
           </p>
         </div>
         <button
@@ -547,67 +588,95 @@ function MinutesTable({
           onClick={onRecalculateMinutes}
           className="shrink-0 rounded-lg border border-pitch bg-green-50 px-3 py-1.5 text-xs font-semibold text-pitch hover:bg-green-100"
         >
-          Refresh play times
+          Refresh
         </button>
       </div>
-      <p className="mt-1 text-xs text-gray-500">
-        Refresh saves recounted minutes from the current pitches. Applying targets rebuilds
-        unedited rotations.
-      </p>
 
-      <ul className="mt-3 space-y-2">
+      <div className="mt-3 flex items-center gap-2 px-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+        <span className="w-8" />
+        <span className="w-16 sm:w-20" />
+        <span className="min-w-0 flex-1" />
+        <span className="w-9 text-right">H1</span>
+        <span className="w-9 text-right">H2</span>
+        <span className="w-11 text-right">Tot</span>
+        <span className="w-14 text-right">tgt</span>
+        <span className="w-11 text-right">diff</span>
+      </div>
+
+      <ul className="mt-1 space-y-2">
         {sorted.map((p) => {
           const projected = projectedMinutes[p.id] ?? 0;
+          const h1 = halfBreakdown.firstHalf[p.id] ?? 0;
+          const h2 = halfBreakdown.secondHalf[p.id] ?? 0;
           const target = draftTargets[p.id] ?? plan.playerTargets[p.id] ?? plan.targetMinutes;
           const coaching = coachingTargets[p.id] ?? plan.targetMinutes;
           const isOverridden = Math.abs(target - coaching) >= 0.5;
-          const pct = (projected / totalMinutes) * 100;
           const diff = projected - target;
+          const halfSkew = Math.abs(h1 - h2);
           return (
-            <li key={p.id} className="flex items-center gap-2">
-              <span className="w-8 text-sm font-bold text-pitch">#{p.number}</span>
-              <span className="w-20 truncate text-sm">{p.name.split(" ")[0]}</span>
-              <div className="min-w-0 flex-1">
-                <div className="relative h-3 overflow-hidden rounded-full bg-gray-100">
+            <li key={p.id}>
+              <div className="flex items-center gap-2">
+                <span className="w-8 text-sm font-bold text-pitch">#{p.number}</span>
+                <span className="w-16 truncate text-sm sm:w-20">{p.name.split(" ")[0]}</span>
+                <div className="min-w-0 flex-1">
                   <div
-                    className="absolute top-0 h-full w-0.5 bg-gray-400"
-                    style={{ left: `${(target / totalMinutes) * 100}%` }}
-                    title={`Target: ${target.toFixed(1)}m`}
-                  />
-                  <div
-                    className="h-full rounded-full bg-pitch-light transition-all"
-                    style={{ width: `${pct}%` }}
-                  />
+                    className="flex h-3 overflow-hidden rounded-full bg-gray-100"
+                    title={`H1 ${h1.toFixed(1)}m · H2 ${h2.toFixed(1)}m · Tot ${projected.toFixed(1)}m`}
+                  >
+                    <div
+                      className="h-full bg-pitch transition-all"
+                      style={{ width: `${(h1 / totalMinutes) * 100}%` }}
+                    />
+                    <div
+                      className="h-full bg-pitch-light transition-all"
+                      style={{ width: `${(h2 / totalMinutes) * 100}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
-              <span className="w-12 text-right text-sm font-medium tabular-nums">
-                {projected.toFixed(1)}m
-              </span>
-              <label className="flex w-14 flex-col items-end">
-                <input
-                  type="number"
-                  min={0}
-                  max={totalMinutes}
-                  step={0.5}
-                  value={Math.round(target * 10) / 10}
-                  onChange={(e) => setTarget(p.id, e.target.value)}
-                  className={`w-full rounded border px-1 py-0.5 text-right text-xs tabular-nums ${
-                    isOverridden
-                      ? "border-blue-400 bg-blue-50 font-medium"
-                      : "border-gray-300"
+                <span
+                  className={`w-9 text-right text-xs tabular-nums ${
+                    halfSkew >= halfMinutes * 0.35 ? "font-semibold text-orange-700" : "text-gray-700"
                   }`}
-                  title={`Coaching target: ${coaching.toFixed(1)}m`}
-                />
-                <span className="text-[10px] text-gray-400">tgt</span>
-              </label>
-              <span
-                className={`w-11 text-right text-xs tabular-nums ${
-                  Math.abs(diff) <= 2 ? "text-green-600" : "text-orange-600"
-                }`}
-              >
-                {diff >= 0 ? "+" : ""}
-                {diff.toFixed(1)}
-              </span>
+                  title="1st half"
+                >
+                  {h1.toFixed(1)}
+                </span>
+                <span
+                  className={`w-9 text-right text-xs tabular-nums ${
+                    halfSkew >= halfMinutes * 0.35 ? "font-semibold text-orange-700" : "text-gray-700"
+                  }`}
+                  title="2nd half"
+                >
+                  {h2.toFixed(1)}
+                </span>
+                <span className="w-11 text-right text-sm font-medium tabular-nums">
+                  {projected.toFixed(1)}
+                </span>
+                <label className="flex w-14 flex-col items-end">
+                  <input
+                    type="number"
+                    min={0}
+                    max={totalMinutes}
+                    step={0.5}
+                    value={Math.round(target * 10) / 10}
+                    onChange={(e) => setTarget(p.id, e.target.value)}
+                    className={`w-full rounded border px-1 py-0.5 text-right text-xs tabular-nums ${
+                      isOverridden
+                        ? "border-blue-400 bg-blue-50 font-medium"
+                        : "border-gray-300"
+                    }`}
+                    title={`Coaching target: ${coaching.toFixed(1)}m`}
+                  />
+                </label>
+                <span
+                  className={`w-11 text-right text-xs tabular-nums ${
+                    Math.abs(diff) <= 2 ? "text-green-600" : "text-orange-600"
+                  }`}
+                >
+                  {diff >= 0 ? "+" : ""}
+                  {diff.toFixed(1)}
+                </span>
+              </div>
             </li>
           );
         })}

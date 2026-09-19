@@ -14,6 +14,8 @@ interface Props {
   players: Player[];
   plan: GamePlan | null;
   subRules: SubstitutionRule[];
+  gameId?: string;
+  gameTitle?: string;
   onPlanChange: (plan: GamePlan) => void;
   onBack: () => void;
 }
@@ -22,12 +24,21 @@ export default function MatchDay({
   players,
   plan,
   subRules,
+  gameId,
+  gameTitle,
   onPlanChange,
   onBack,
 }: Props) {
   const [running, setRunning] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [segmentIndex, setSegmentIndex] = useState(0);
+
+  // Reset clock when switching to a different saved game.
+  useEffect(() => {
+    setRunning(false);
+    setElapsedSeconds(0);
+    setSegmentIndex(0);
+  }, [gameId]);
 
   const elapsedMinutes = elapsedSeconds / 60;
   const totalSeconds = plan ? plan.settings.halfMinutes * 2 * 60 : 0;
@@ -85,6 +96,9 @@ export default function MatchDay({
       <div className="rounded-xl bg-pitch p-4 text-white shadow-lg">
         <div className="flex items-center justify-between">
           <div>
+            {gameTitle && (
+              <p className="mb-1 text-xs font-medium opacity-90">{gameTitle}</p>
+            )}
             <p className="text-xs uppercase tracking-wide opacity-80">Match Clock</p>
             <p className="text-4xl font-bold tabular-nums">
               {formatMinute(elapsedMinutes)}
