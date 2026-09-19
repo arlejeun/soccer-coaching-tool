@@ -222,6 +222,75 @@ export function isGameDayNewer(
   return aTime > bTime;
 }
 
+function gameNewer(a: SavedGame, b: SavedGame): boolean {
+  const aTime = Date.parse(a.updatedAt || "") || 0;
+  const bTime = Date.parse(b.updatedAt || "") || 0;
+  return aTime >= bTime;
+}
+
+/**
+ * Union local + remote games by id so Reload never drops a match that only
+ * exists on one side. Per-game, the newer `updatedAt` wins.
+ */
+export function mergeGameDayStates(
+  local: GameDayState,
+  remote: GameDayState | null
+): { state: GameDayState; shouldPush: boolean } {
+  if (!remote) {
+    return {
+      state: local,
+      shouldPush: hasAnyPlan(local) || local.games.length > 1,
+    };
+  }
+
+  const byId = new Map<string, SavedGame>();
+  for (const g of remote.games) byId.set(g.id, g);
+  for (const g of local.games) {
+    const existing = byId.get(g.id);
+    if (!existing || gameNewer(g, existing)) {
+      byId.set(g.id, g);
+    }
+  }
+
+  const games = Array.from(byId.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
+
+  const localActiveOk = games.some((g) => g.id === local.activeGameId);
+  const remoteActiveOk = games.some((g) => g.id === remote.activeGameId);
+  const preferredActive = localActiveOk
+    ? local.activeGameId
+    : remoteActiveOk
+      ? remote.activeGameId
+      : games[0]?.id;
+
+  const useLocalMeta = isGameDayNewer(local, remote);
+  const state: GameDayState = {
+    updatedAt: useLocalMeta ? local.updatedAt : remote.updatedAt,
+    activeGameId: preferredActive || local.activeGameId,
+    games: games.length > 0 ? games : local.games,
+    subRules: useLocalMeta ? local.subRules : remote.subRules,
+  };
+
+  const remoteIds = new Set(remote.games.map((g) => g.id));
+  const localOnly = local.games.some((g) => !remoteIds.has(g.id));
+  const countMismatch = local.games.length !== remote.games.length;
+  const contentNewer = local.games.some((g) => {
+    const r = remote.games.find((x) => x.id === g.id);
+    return Boolean(r && g.updatedAt !== r.updatedAt && gameNewer(g, r));
+  });
+
+  const shouldPush = localOnly || countMismatch || contentNewer;
+
+  return {
+    state: {
+      ...state,
+      updatedAt: shouldPush ? new Date().toISOString() : state.updatedAt,
+    },
+    shouldPush,
+  };
+}
+
 export function hasAnyPlan(state: GameDayState): boolean {
   return state.games.some((g) => g.plan != null);
 }

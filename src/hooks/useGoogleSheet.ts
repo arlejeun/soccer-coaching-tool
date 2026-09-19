@@ -7,9 +7,8 @@ import {
   addGame,
   deleteGame,
   getActiveGame,
-  hasAnyPlan,
-  isGameDayNewer,
   loadGameDayStateFromLocal,
+  mergeGameDayStates,
   normalizeGameDayState,
   patchActiveGame,
   renameGame,
@@ -90,18 +89,14 @@ export function useGoogleSheet() {
       const remote = data.gameDayState
         ? normalizeGameDayState(data.gameDayState)
         : null;
-      let gameDay = localGameDay;
-      let shouldPushLocalGameDay = false;
 
-      if (remote && isGameDayNewer(remote, localGameDay)) {
-        gameDay = remote;
-        writeGameDayStateToLocal(gameDay);
-      } else if (
-        hasAnyPlan(localGameDay) &&
-        (remote == null || isGameDayNewer(localGameDay, remote))
-      ) {
-        shouldPushLocalGameDay = true;
-      }
+      // Merge by game id — Reload must not wipe a second local tournament game
+      // just because Sheets still only has one row.
+      const { state: gameDay, shouldPush: shouldPushLocalGameDay } = mergeGameDayStates(
+        localGameDay,
+        remote
+      );
+      writeGameDayStateToLocal(gameDay);
 
       setState({
         players: data.players.length > 0 ? data.players : INITIAL_ROSTER,
