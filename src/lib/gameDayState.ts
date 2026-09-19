@@ -228,9 +228,22 @@ function gameNewer(a: SavedGame, b: SavedGame): boolean {
   return aTime >= bTime;
 }
 
+function gameHasPlan(game: SavedGame): boolean {
+  return Boolean(game.plan?.segments && game.plan.segments.length > 0);
+}
+
+/** Prefer a game that still has a plan over a newer empty shell of the same id. */
+export function pickPreferredGame(a: SavedGame, b: SavedGame): SavedGame {
+  const aHas = gameHasPlan(a);
+  const bHas = gameHasPlan(b);
+  if (aHas && !bHas) return a;
+  if (bHas && !aHas) return b;
+  return gameNewer(a, b) ? a : b;
+}
+
 /**
  * Union local + remote games by id so Reload never drops a match that only
- * exists on one side. Per-game, the newer `updatedAt` wins.
+ * exists on one side. Never let an empty local game wipe a remote plan.
  */
 export function mergeGameDayStates(
   local: GameDayState,
@@ -247,9 +260,7 @@ export function mergeGameDayStates(
   for (const g of remote.games) byId.set(g.id, g);
   for (const g of local.games) {
     const existing = byId.get(g.id);
-    if (!existing || gameNewer(g, existing)) {
-      byId.set(g.id, g);
-    }
+    byId.set(g.id, existing ? pickPreferredGame(g, existing) : g);
   }
 
   const games = Array.from(byId.values()).sort((a, b) =>
@@ -275,12 +286,16 @@ export function mergeGameDayStates(
   const remoteIds = new Set(remote.games.map((g) => g.id));
   const localOnly = local.games.some((g) => !remoteIds.has(g.id));
   const countMismatch = local.games.length !== remote.games.length;
-  const contentNewer = local.games.some((g) => {
+  // Only push when local actually contributes something Sheets is missing
+  // (extra game, or a newer revision that still has a plan).
+  const localContributes = local.games.some((g) => {
     const r = remote.games.find((x) => x.id === g.id);
-    return Boolean(r && g.updatedAt !== r.updatedAt && gameNewer(g, r));
+    if (!r) return true;
+    const picked = pickPreferredGame(g, r);
+    return picked === g && (gameHasPlan(g) || !gameHasPlan(r));
   });
 
-  const shouldPush = localOnly || countMismatch || contentNewer;
+  const shouldPush = localOnly || (countMismatch && localContributes) || localContributes;
 
   return {
     state: {

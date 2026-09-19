@@ -255,6 +255,8 @@ function writeGamesToSheet_(state) {
 
 function parseJsonCell_(value, fallback) {
   if (value === "" || value === null || value === undefined) return fallback;
+  // Already parsed (rare) — keep as-is.
+  if (typeof value === "object") return value;
   try {
     return JSON.parse(String(value));
   } catch (err) {
