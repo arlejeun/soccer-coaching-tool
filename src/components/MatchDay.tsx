@@ -8,6 +8,11 @@ import {
 import EditableSegmentLineup from "./EditableSegmentLineup";
 import { getBenchSubstitutions, getFieldShuffles } from "../lib/subDisplay";
 import { slotLabel } from "../lib/planEdits";
+import {
+  clearMatchClock,
+  loadMatchClock,
+  saveMatchClock,
+} from "../lib/matchClock";
 import { POSITION_COLORS } from "../types";
 
 interface Props {
@@ -29,20 +34,44 @@ export default function MatchDay({
   onPlanChange,
   onBack,
 }: Props) {
+  const totalSeconds = plan ? plan.settings.halfMinutes * 2 * 60 : 0;
+  const halfSeconds = plan ? plan.settings.halfMinutes * 60 : 0;
+
   const [running, setRunning] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [segmentIndex, setSegmentIndex] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
 
-  // Reset clock when switching to a different saved game.
+  // Restore clock when switching games (not on every plan edit).
   useEffect(() => {
-    setRunning(false);
-    setElapsedSeconds(0);
-    setSegmentIndex(0);
-  }, [gameId]);
+    const restored = loadMatchClock(gameId, totalSeconds);
+    setElapsedSeconds(restored.elapsedSeconds);
+    setRunning(restored.running);
+    setHydrated(true);
+  }, [gameId, totalSeconds]);
+
+  // Persist while the match is open (including mid-tick and pause).
+  useEffect(() => {
+    if (!hydrated || !gameId) return;
+    saveMatchClock(gameId, { elapsedSeconds, running });
+  }, [gameId, elapsedSeconds, running, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !gameId) return;
+    const persist = () =>
+      saveMatchClock(gameId, { elapsedSeconds, running });
+    const onHide = () => {
+      if (document.visibilityState === "hidden") persist();
+    };
+    window.addEventListener("pagehide", persist);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", persist);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+  }, [gameId, elapsedSeconds, running, hydrated]);
 
   const elapsedMinutes = elapsedSeconds / 60;
-  const totalSeconds = plan ? plan.settings.halfMinutes * 2 * 60 : 0;
-  const halfSeconds = plan ? plan.settings.halfMinutes * 60 : 0;
 
   useEffect(() => {
     if (!running || !plan) return;
@@ -60,10 +89,10 @@ export default function MatchDay({
   }, [running, plan, totalSeconds]);
 
   useEffect(() => {
-    if (plan) {
+    if (plan && hydrated) {
       setSegmentIndex(getCurrentSegment(plan, elapsedMinutes));
     }
-  }, [plan, elapsedMinutes]);
+  }, [plan, elapsedMinutes, hydrated]);
 
   if (!plan) {
     return (
@@ -89,6 +118,13 @@ export default function MatchDay({
     const target = plan.segments[clamped];
     setSegmentIndex(clamped);
     setElapsedSeconds(Math.round(target.startMinute * 60));
+  };
+
+  const handleReset = () => {
+    setRunning(false);
+    setElapsedSeconds(0);
+    setSegmentIndex(0);
+    clearMatchClock(gameId);
   };
 
   return (
@@ -124,11 +160,7 @@ export default function MatchDay({
           </button>
           <button
             type="button"
-            onClick={() => {
-              setRunning(false);
-              setElapsedSeconds(0);
-              setSegmentIndex(0);
-            }}
+            onClick={handleReset}
             className="rounded-lg bg-pitch-dark px-4 py-3 font-medium"
           >
             Reset
@@ -141,6 +173,9 @@ export default function MatchDay({
             style={{ width: `${(elapsedSeconds / totalSeconds) * 100}%` }}
           />
         </div>
+        <p className="mt-2 text-center text-[11px] text-white/70">
+          Clock is saved for this game — reload keeps your place.
+        </p>
       </div>
 
       <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200">
