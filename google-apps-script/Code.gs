@@ -15,7 +15,9 @@
 const ROSTER_SHEET = "Roster";
 const COACHING_SHEET = "Coaching";
 const SETTINGS_SHEET = "Settings";
+const GAMES_SHEET = "Games";
 const API_SECRET_KEY = "API_SECRET";
+const MAX_CELL_CHARS = 49000;
 
 /**
  * Run once: replace the string below with a long random secret (16+ chars),
@@ -81,7 +83,8 @@ function setupSheet() {
     ["key", "value"],
     ["meritInfluence", 50],
   ]);
-  // gameDayState is written as a JSON string when the app saves a plan.
+
+  ensureGamesSheet_();
 
   SpreadsheetApp.flush();
 }
@@ -140,6 +143,10 @@ function loadAll() {
 }
 
 function readGameDayState() {
+  var fromGames = readGameDayStateFromGamesSheet_();
+  if (fromGames) return fromGames;
+
+  // Legacy: everything in one Settings cell (breaks once multiple plans exceed ~50k chars).
   var raw = readSettingRaw("gameDayState", "");
   if (!raw) return null;
   try {
@@ -151,10 +158,155 @@ function readGameDayState() {
 
 function writeGameDayState(state) {
   if (!state) {
+    clearGamesSheet_();
+    writeSetting("activeGameId", "");
+    writeSetting("subRules", "");
     writeSetting("gameDayState", "");
     return;
   }
-  writeSetting("gameDayState", JSON.stringify(state));
+
+  writeGamesToSheet_(state);
+  writeSetting("activeGameId", state.activeGameId || "");
+  writeSetting("subRules", JSON.stringify(state.subRules || []));
+  // Clear legacy blob so we don't keep a huge cell around.
+  writeSetting("gameDayState", "");
+}
+
+function ensureGamesSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(GAMES_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(GAMES_SHEET);
+  }
+  var header = sheet.getRange(1, 1, 1, 8).getValues()[0];
+  if (String(header[0]) !== "id") {
+    sheet.clear();
+    sheet.getRange(1, 1, 1, 8).setValues([
+      [
+        "id",
+        "name",
+        "opponent",
+        "when",
+        "updatedAt",
+        "gameSettings",
+        "availability",
+        "plan",
+      ],
+    ]);
+  }
+  return sheet;
+}
+
+function clearGamesSheet_() {
+  var sheet = ensureGamesSheet_();
+  var last = sheet.getLastRow();
+  if (last > 1) {
+    sheet.getRange(2, 1, last - 1, 8).clearContent();
+  }
+}
+
+function assertCellSize_(label, text) {
+  var s = text == null ? "" : String(text);
+  if (s.length > MAX_CELL_CHARS) {
+    throw new Error(
+      label +
+        " is too large for Google Sheets (" +
+        s.length +
+        " chars; max ~" +
+        MAX_CELL_CHARS +
+        "). Remove a game or simplify the plan."
+    );
+  }
+  return s;
+}
+
+function writeGamesToSheet_(state) {
+  var sheet = ensureGamesSheet_();
+  var games = state.games || [];
+  clearGamesSheet_();
+  if (games.length === 0) return;
+
+  var rows = games.map(function (g) {
+    var settingsJson = assertCellSize_(
+      "Settings for " + (g.name || g.id),
+      JSON.stringify(g.gameSettings || {})
+    );
+    var availabilityJson = assertCellSize_(
+      "Availability for " + (g.name || g.id),
+      JSON.stringify(g.gameDayAvailability || {})
+    );
+    var planJson = assertCellSize_(
+      "Plan for " + (g.name || g.id),
+      g.plan ? JSON.stringify(g.plan) : ""
+    );
+    return [
+      g.id || "",
+      g.name || "",
+      g.opponent || "",
+      g.when || "",
+      g.updatedAt || "",
+      settingsJson,
+      availabilityJson,
+      planJson,
+    ];
+  });
+  sheet.getRange(2, 1, rows.length, 8).setValues(rows);
+}
+
+function parseJsonCell_(value, fallback) {
+  if (value === "" || value === null || value === undefined) return fallback;
+  try {
+    return JSON.parse(String(value));
+  } catch (err) {
+    return fallback;
+  }
+}
+
+function readGameDayStateFromGamesSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(GAMES_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+
+  var rows = sheet.getDataRange().getValues();
+  if (rows.length < 2) return null;
+  var headers = rows[0].map(String);
+  var games = [];
+
+  rows.slice(1).forEach(function (row) {
+    if (!row[0]) return;
+    var obj = {};
+    headers.forEach(function (h, i) {
+      obj[h] = row[i];
+    });
+    games.push({
+      id: String(obj.id),
+      name: String(obj.name || obj.id),
+      opponent: obj.opponent ? String(obj.opponent) : undefined,
+      when: obj.when ? String(obj.when) : undefined,
+      updatedAt: obj.updatedAt ? String(obj.updatedAt) : new Date(0).toISOString(),
+      gameSettings: parseJsonCell_(obj.gameSettings, {}),
+      gameDayAvailability: parseJsonCell_(obj.availability, {}),
+      plan: parseJsonCell_(obj.plan, null),
+    });
+  });
+
+  if (games.length === 0) return null;
+
+  var activeGameId = String(readSettingRaw("activeGameId", "") || "");
+  if (!activeGameId || !games.some(function (g) { return g.id === activeGameId; })) {
+    activeGameId = games[0].id;
+  }
+
+  var subRules = parseJsonCell_(readSettingRaw("subRules", ""), []);
+  var updatedAt = games.reduce(function (max, g) {
+    return g.updatedAt > max ? g.updatedAt : max;
+  }, games[0].updatedAt);
+
+  return {
+    updatedAt: updatedAt,
+    activeGameId: activeGameId,
+    games: games,
+    subRules: subRules,
+  };
 }
 
 function readRoster() {

@@ -27,6 +27,7 @@ interface Props {
   availability: Record<string, PlayerAvailability>;
   subRules: SubstitutionRule[];
   plan: GamePlan | null;
+  gameTitle?: string;
   onSettingsChange: (settings: GameSettings) => void;
   onAvailabilityChange: (availability: Record<string, PlayerAvailability>) => void;
   onSubRulesChange: (rules: SubstitutionRule[]) => void;
@@ -40,6 +41,7 @@ export default function GamePlanner({
   availability,
   subRules,
   plan,
+  gameTitle,
   onSettingsChange,
   onAvailabilityChange,
   onSubRulesChange,
@@ -449,6 +451,7 @@ export default function GamePlanner({
     {plan && (
       <PlanPrintSheet
         plan={plan}
+        gameTitle={gameTitle}
         players={players.filter((p) =>
           (plan.activePlayerIds ?? players.map((x) => x.id)).includes(p.id)
         )}

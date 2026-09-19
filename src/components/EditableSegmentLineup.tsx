@@ -7,6 +7,7 @@ import {
   canSaveStartingLineup,
   checkLineupWarnings,
   getLineupSlotCandidates,
+  lineupSlotCandidateTag,
   setLineupSlotPlayer,
   slotLabel,
 } from "../lib/planEdits";
@@ -111,8 +112,9 @@ export default function EditableSegmentLineup({
       </div>
 
       <p className="text-xs text-gray-500">
-        Change who plays each spot. Picking someone already on the field swaps their
-        positions; picking from the bench brings them on.
+        Any available player can play any spot. Picking someone already on the field
+        swaps positions; picking from the bench brings them on. Out-of-position picks
+        are allowed (warning only).
       </p>
 
       <ul className="space-y-2">
@@ -120,7 +122,6 @@ export default function EditableSegmentLineup({
           const candidates = getLineupSlotCandidates(plan, slot.id, draftLineup, players);
           const currentId = draftLineup[slot.id] ?? "";
           const current = currentId ? getPlayerById(players, currentId) : null;
-          const currentEligible = candidates.some((p) => p.id === currentId);
 
           return (
             <li key={slot.id} className="flex items-center gap-2">
@@ -135,35 +136,24 @@ export default function EditableSegmentLineup({
                 className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-2 py-2 text-sm"
               >
                 {!currentId && <option value="">— pick —</option>}
-                {!currentEligible && current && (
-                  <option value={current.id}>
-                    #{current.number} {current.name} (current)
-                  </option>
-                )}
-                {candidates
-                  .filter((p) => p.id !== currentId || currentEligible)
-                  .map((p) => {
-                    const onFieldElsewhere = Object.entries(draftLineup).some(
-                      ([id, pid]) => id !== slot.id && pid === p.id
-                    );
-                    const onBench = draftBench.includes(p.id);
-                    const displaced = current
-                      ? `#${current.number} ${current.name.split(" ")[0]}`
-                      : null;
-                    const tag = onFieldElsewhere
-                      ? " (swap positions — minutes unchanged)"
-                      : onBench && displaced
-                        ? ` (from bench, replaces ${displaced})`
-                        : onBench
-                          ? " (from bench)"
-                          : "";
-                    return (
-                      <option key={p.id} value={p.id}>
-                        #{p.number} {p.name}
-                        {tag}
-                      </option>
-                    );
-                  })}
+                {candidates.map((p) => {
+                  const displaced = current
+                    ? `#${current.number} ${current.name.split(" ")[0]}`
+                    : null;
+                  const tag = lineupSlotCandidateTag(
+                    p,
+                    slot.id,
+                    draftLineup,
+                    draftBench,
+                    displaced
+                  );
+                  return (
+                    <option key={p.id} value={p.id}>
+                      #{p.number} {p.name}
+                      {tag}
+                    </option>
+                  );
+                })}
               </select>
             </li>
           );

@@ -68,7 +68,7 @@ Scores are 1–5. `practice` = practice & effort at training; `performance` = sk
 | meritInfluence | 50 |
 | gameDayState | `{...}` JSON blob of the current plan |
 
-`gameDayState` is written automatically when you generate or edit a plan. Do not edit that cell by hand.
+`gameDayState` used to be one JSON cell (too small for tournaments). The app now uses a **Games** tab — one row per match — plus `activeGameId` / `subRules` in Settings.
 
 ## Redeploy after script updates
 

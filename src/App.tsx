@@ -6,6 +6,8 @@ import CoachingInputPanel from "./components/CoachingInput";
 import GamePlanner from "./components/GamePlanner";
 import MatchDay from "./components/MatchDay";
 import SheetSyncBar from "./components/SheetSyncBar";
+import GameSwitcher from "./components/GameSwitcher";
+import { gameLabel } from "./lib/gameDayState";
 import type { GameSettings } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
@@ -20,6 +22,7 @@ export default function App() {
     meritInfluence: sheet.meritInfluence,
     maxConsecutiveBenchRotations: DEFAULT_SETTINGS.maxConsecutiveBenchRotations,
   };
+  const activeLabel = gameLabel(sheet.activeGame);
 
   return (
     <div className="mx-auto min-h-screen max-w-lg pb-24 print:block print:max-w-none print:pb-0">
@@ -51,6 +54,19 @@ export default function App() {
             onMeritInfluenceChange={sheet.setMeritInfluence}
           />
         )}
+        {(tab === "plan" || tab === "match") && (
+          <div className="mb-4">
+            <GameSwitcher
+              games={sheet.games}
+              activeGameId={sheet.activeGameId}
+              onSelect={sheet.selectGame}
+              onCreate={sheet.createGame}
+              onDuplicate={sheet.duplicateActiveGame}
+              onDelete={sheet.removeGame}
+              onRename={sheet.updateGameMeta}
+            />
+          </div>
+        )}
         {tab === "plan" && (
           <GamePlanner
             players={sheet.players.length > 0 ? sheet.players : INITIAL_ROSTER}
@@ -59,6 +75,7 @@ export default function App() {
             availability={sheet.gameDayAvailability}
             subRules={sheet.subRules}
             plan={sheet.plan}
+            gameTitle={activeLabel}
             onSettingsChange={(s) =>
               sheet.setGameSettings({
                 halfMinutes: s.halfMinutes,
@@ -78,6 +95,8 @@ export default function App() {
             players={sheet.players.length > 0 ? sheet.players : INITIAL_ROSTER}
             plan={sheet.plan}
             subRules={sheet.subRules}
+            gameId={sheet.activeGameId}
+            gameTitle={activeLabel}
             onPlanChange={sheet.setPlan}
             onBack={() => setTab("plan")}
           />
